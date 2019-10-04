@@ -8,9 +8,9 @@ Nonparametric One-Way ANOVA
 
 Analysis of Covariance
 
-Linear Regression
+Linear Regression (Single, Multivariable)
 
-Binary Logistic Regression
+Binary Logistic Regression (Single, Multivariable)
 
 Generalized Linear Model
 
