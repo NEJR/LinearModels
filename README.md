@@ -18,4 +18,4 @@ Mixed Models
 
 #### Option:
 
-correlation map
+correlation map (n x n colored graph)
