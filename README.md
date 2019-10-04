@@ -15,3 +15,7 @@ Binary Logistic Regression (Single, Multivariable)
 Generalized Linear Model
 
 Mixed Models
+
+#### Option:
+
+correlation map
