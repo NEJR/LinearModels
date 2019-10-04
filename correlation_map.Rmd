@@ -1,0 +1,22 @@
+### Correlation between vital signs
+Plotting
+We can visualize graphically how variables correlate between each other.
+```{r}
+cat <-  c("sysbp", "meanbp", "diasbp", "heartrate", "temperature", "spo2")
+
+dummydata<-df_vitals %>%
+  select(sysbp,meanbp,diasbp,heartrate,temperature,spo2)
+
+cor(dummydata[complete.cases(dummydata),])
+```
+
+```{r}
+e1<-dummydata[, names(dummydata) %in% (cat)]
+e2 <- data.frame(lapply(e1, function(x) as.numeric(as.character(x))))
+
+cor_total_min<-cor(e2, use = "pairwise.complete.obs")
+#We are looking for a sensible multiple imputation strategy to fill in the spaces so we use = "pairwise.complete.obs".
+
+#non interactive corplot
+corrplot(cor_total_min, method = "color",  tl.col = "black" )
+```
