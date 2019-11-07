@@ -1,0 +1,331 @@
+---
+title: "Midterm"
+author: "Takahiro"
+date: "2019/11/1"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Stepwise Regression  
+#### BST 213のMidterm examinationであるlinear regressionの変数選択のRMDファイルです。  
+Clinical studyをやる際、Stepwise Regressionに関して一番知っておかなければならないことは、Stepwise Regressionはやってはいけないということです(笑)  
+これはどうしても多重検定による偽陽性の問題を避けられないからとされています。  
+Causal inferenceをやるのかprediction modelを作るのかで変数選択の方法は変わりますが、どちらにせよ時代遅れな方法なのでStepwiseの出番はありません。  
+ただただ未来のHSPH生のためだけにRMDファイルを残します。  
+まずはdatasetを読み込みます。
+
+```{r}
+library(readxl)
+dat <- read_excel("C:/Users/ogmcd/Dropbox/00_2019_Class/Fall/BST213/Dataset/iadl.xlsx", sheet = "iadl")
+```
+
+Stepwise Regressionのためには、MASSというlibraryを使います。
+```{r}
+library(tidyverse)
+library(psych)
+library(MASS)
+library(tableone)
+```
+
+まずはmissing valueの確認から。  
+これには色んな方法があると思いますが、私はskimrというlibraryを使いました。  
+ちょうどよく小さいヒストグラムも確認できます。  
+（※knit後は消えてしまいます）
+```{r}
+library(skimr)
+dat %>% skimr::skim()
+```
+
+次に、datasetの中身をもう少し確認しておきましょう。  
+summary functionを使ってもいいのですが、skewness, kurtosisも出してくれるので、psychというlibraryのdescribeというfunctionを使いました。
+```{r}
+dat %>% str
+dat %>% describe
+dat %>% head
+```
+
+dat %>% strのoutputからわかるように、OravはSASとStata用にdatasetを作っているので、全ての因子がnumericです。  
+（すなわち、racecatやdepcatはcatになっていない）  
+まずはcontinuous variablesのhistogramをみておきます。
+```{r}
+hist(dat$ptage)
+hist(dat$whiteley)
+hist(dat$iadl)
+hist(dat$social)
+hist(dat$charlson)
+hist(dat$physical)
+```
+
+目的変数であるiadlのヒストグラムのみpngファイルとして保存します。  
+1行目が"plot1.png"というファイルを作成  
+2行目が描画  
+3行目が描画したfigureを保存  
+というコードになっています。  
+毎回保存されると面倒なので、Rmdファイルでは#で無効化しておきました。
+```{r}
+#png("plot1.png")
+#hist(dat$iadl)
+#dev.off()
+```
+
+一応「linearityについてコメントせよ」と言われていますので、scatter plotもチラ見しておきます。  
+別に必須ではないと思います。
+```{r}
+ggplot(dat, aes(x=ptage, y=iadl)) + geom_point()
+ggplot(dat, aes(x=edcat, y=iadl)) + geom_point()
+ggplot(dat, aes(x=charlson, y=iadl)) + geom_point()
+ggplot(dat, aes(x=physical, y=iadl)) + geom_point()
+ggplot(dat, aes(x=whiteley, y=iadl)) + geom_point()
+ggplot(dat, aes(x=social, y=iadl)) + geom_point()
+```
+
+さて、このままでは解析できないので、Binary/Categorical variableを処理していきます。  
+まずはCategorical variableのreferenceを決めるために、症例数をみておきましょう。
+```{r}
+table(dat$racecat)
+table(dat$depcat)
+```
+
+raceはWhiteが一番多く、depcatはNoneが一番多いので、この2つをreferenceとするのが最もpowerがあります。  
+医学的にも、White people, non-depressive patientsをrefとするのが良さそうです。  
+Oravが名前をつけたracecat, depcatが実は連続変数で、私が命名したrace, depがカテゴリー変数になってますがまあ許してください。  
+今回edcatはordinary variableでという指示が出ていますが、tableoneコマンドで全カテゴリの分布をみるために、ここでcategorical variablesバージョンも作成しました。  
+Binary variablesも最終的なアウトプットをイメージしてreferenceを設定しています。
+```{r}
+dat <-
+  mutate(dat, female_bin = if_else(female == 1, true = "F", false = "M"))
+dat$female_bin <- as.factor(dat$female_bin)
+dat$female_bin <- relevel(dat$female_bin, ref="F")
+
+dat <-
+  mutate(dat, married_bin = if_else(married == 1, true = "Yes", false = "No"))
+dat$married_bin <- as.factor(dat$married_bin)
+dat$married_bin <- relevel(dat$married_bin, ref="No")
+
+dat <-
+  mutate(dat, anxiety_bin = if_else(anxiety == 1, true = "Yes", false = "No"))
+dat$anxiety_bin <- as.factor(dat$anxiety_bin)
+dat$anxiety_bin <- relevel(dat$anxiety_bin, ref="No")
+
+dat <-
+  mutate(dat, race = case_when(racecat == 1 ~ "White",
+                               racecat == 2 ~ "Black",
+                               racecat == 3 ~ "Hispanic",
+                               racecat == 4 ~ "Others"))
+dat$race <- as.factor(dat$race)
+dat$race <- relevel(dat$race, ref="White")
+
+dat <-
+  mutate(dat, dep = case_when(depcat == 0 ~ "None",
+                                     depcat == 1 ~ "Minor",
+                                     depcat == 2 ~ "Major"))
+dat$dep <- as.factor(dat$dep)
+dat$dep <- relevel(dat$dep, ref="None")
+
+dat <-
+  mutate(dat, education = case_when(edcat == 1 ~ "High School or Less",
+                                    edcat == 2 ~ "Some College",
+                                    edcat == 3 ~ "Completed College or Graduate School"))
+dat$education <- as.factor(dat$education)
+dat$education <- relevel(dat$education, ref="High School or Less")
+```
+
+変数を作った時は必ずうまく行っていることを確認します。
+```{r}
+table(dat$female_bin)
+table(dat$married_bin)
+table(dat$anxiety_bin)
+table(dat$race)
+table(dat$dep)
+table(dat$education)
+```
+
+もしここでdepressionのカテゴリー別、あるいはanxietyのカテゴリー別にtableoneを作成したいのであれば、下記のコマンドで作成可能です。  
+これがやりたい人は#を外してください。  
+私は曝露2つで別々に分類したtableoneを作ることはためらわれたので、単にcohort全体の記述統計量を記載しました。
+```{r}
+myVars <- c('ptage', 'whiteley', 'edcat', 'social', 'charlson', 'physical', 'female_bin',
+            'married_bin', 'anxiety_bin', 'race', 'dep', 'education')
+#tab11 <- CreateTableOne(vars = myVars, strata = "dep" , data = dat)
+#tab12 <- CreateTableOne(vars = myVars, strata = "anxiety_bin" , data = dat)
+tab1_all <- CreateTableOne(vars = myVars, data = dat)
+```
+
+結果をプリントアウトしてエクセルなどにコピペ、更にWordにコピペしました。  
+本当はもっと簡便な方法があると思います。
+```{r}
+print(tab1_all)
+```
+
+層別化した（通常の臨床研究で使われる）tableoneを作成した場合、summaryコマンドでグループ毎の比較も可能です。
+```{r}
+#summary(tab11)
+#summary(tab12)
+```
+
+さて、これが最後の下ごしらえです。  
+Datasetの中からmissing valueを含む行は予め落としておきましょう。  
+通常Rのregressionでは勝手にmissing valueを含む項はdropされるので、この工程は必要ありません。  
+ただStepwiseの場合は、選択する変数が変わる毎にmissing valueを持つ行の数が変わるため、モデル毎に症例数が変わることになります。  
+そうすると、「症例数変わるけど大丈夫？」って聞いてきて解析が前に進みません。
+```{r}
+dat_wo_missing <- na.exclude (dat)
+```
+
+一応念のためにsimple linear regressionでcrude associationをみておきます。  
+最終的なモデルの関心からは全く必要ない工程ですが、私はお作法的なものと理解しています。
+```{r}
+sing_mod1 <- lm(iadl ~ dep, data = dat_wo_missing)
+sing_mod1 %>% summary
+sing_mod1 %>% confint
+
+sing_mod2 <- lm(iadl ~ anxiety_bin, data = dat_wo_missing)
+sing_mod2 %>% summary
+sing_mod2 %>% confint
+```
+
+
+## いよいよStepwiseをもちいたLinear Regressionを行います。  
+MASSというlibraryのstepwiseは下記のような仕組みになっています。  
+stepAIC(start.model, direction = 'forward/backward/both')  
+ここでstart.modelが最初のモデルで、directionを指定できます。  
+  
+#### forward selectionがやりたければ、start.modelを最小のモデルにしてdirection='forward'に指定  
+  
+#### backward selectionがやりたければstart.modelを最大のモデルにしてdirection='backward'に指定  
+  
+#### いわゆるstepwiseがやりたければどちらから始めてもいい  
+ことになります。  
+これに加えて、scope=list(lower=min.model, upper=full.model)で最小のモデルと最大のモデルを指定できます。  
+まず、下記の下ごしらえをしておきましょう。  
+  
+### 最小のモデルを指定
+```{r}
+min.model <- lm(iadl ~ dep + anxiety_bin, data = dat_wo_missing)
+```
+
+### 最大のモデルを指定
+```{r}
+full.model <- lm(iadl ~ dep + anxiety_bin + ptage + whiteley + married_bin + female_bin
+                 + edcat + social + race + charlson + physical , data = dat_wo_missing)
+```
+
+## min.modelから始めてforward selection
+```{r}
+step.forward <- stepAIC(min.model, direction = 'forward', trace = TRUE,
+                       scope=list(lower=min.model, upper=full.model))
+summary(step.forward)
+```
+
+## full.modelから始めてbackward selection
+```{r}
+step.backward <- stepAIC(full.model, direction = 'backward', trace = TRUE,
+                   scope=list(lower=min.model, upper=full.model))
+summary(step.backward)
+```
+
+## min.modelから始めてstepwise
+```{r}
+step.forback <- stepAIC(min.model, direction = 'both', trace = TRUE,
+                       scope=list(lower=min.model, upper=full.model))
+summary(step.forback)
+```
+
+## full.modelから始めてstepwise
+```{r}
+step.backfor <- stepAIC(full.model, direction = 'both', trace = TRUE,
+                       scope=list(lower=min.model, upper=full.model))
+summary(step.backfor)
+```
+
+このデータセットでは4種類のどの手法でやっても同じ結論に行きつきます。  
+ちなみに、これはp値を元に変数選択をしているのではなく、AICというoverfittingとunderfittingのバランスを取る統計量が最小になるモデルを選択しているのでお間違いなく。  
+数学的にはp値が0.15程度より小さければモデルに残るようです。  
+さて、ここからOrav流にdata drivenなconfounderを決めに行きましょう。  
+まずはstepwiseで決められたbest predictive modelを変数に格納します。
+```{r}
+predictormodel <- lm(iadl ~ dep + anxiety_bin + social + race + ptage + charlson + edcat + whiteley, data = dat_wo_missing)
+```
+
+そこからbetaを取り出します。
+```{r}
+beta_depMajor <- predictormodel[[1]][[2]]
+beta_depMinor <- predictormodel[[1]][[3]]
+beta_anx <- predictormodel[[1]][[4]]
+```
+
+Stepwiseで落とされたphysical, female_bin, married_binのそれぞれを投入したモデルを作成します。
+```{r}
+modelphysical <- lm(iadl ~ dep + anxiety_bin + social + race + ptage + charlson + edcat + whiteley + physical, data = dat_wo_missing)
+modelfemale <- lm(iadl ~ dep + anxiety_bin + social + race + ptage + charlson + edcat + whiteley + female_bin, data = dat_wo_missing)
+modelmarried <- lm(iadl ~ dep + anxiety_bin + social + race + ptage + charlson + edcat + whiteley + married_bin, data = dat_wo_missing)
+```
+
+それぞれのモデルからbetaを取り出しましょう。
+```{r}
+betas <- matrix(nrow=3, ncol=3)
+list_of_models <- list(modelphysical, modelfemale, modelmarried)
+vec <- c(1:3)
+
+for (i in vec)
+{
+  for (j in vec)
+  {
+    betas[i,j] <- list_of_models[i][[1]][[1]][[j+1]]
+  }
+}
+
+print(betas)
+```
+
+これを、predictormodelのbetaと比べます。
+```{r}
+list_of_original_betas <- list(beta_depMajor, beta_depMinor, beta_anx)
+list_of_variables <- list('Major Depression', 'Minor Depression', 'anxiety')
+list_of_confounders <- list('physical', 'female_bin', 'married_bin')
+
+betachange <- matrix(nrow=3, ncol=3)
+
+for (i in vec)
+{
+  for (j in vec)
+  {
+    betachange[i,j] <- sprintf('The change in beta coefficient of %s by including %s is %s.',
+                              list_of_variables[[j]], list_of_confounders[[i]],
+                              betas[i,j]/list_of_original_betas[[j]])
+    print(betachange[i,j])
+  }
+}
+```
+
+どの変数を投入しても、predictor of interestであるdepression, anxietyのbeta coefficientは10%以上変わらないことがわかります。  
+したがって、これ以上投入すべきdata drivenなconfoundersはないという結論になりました。  
+すなわち、predictormodelが最終モデルです。  
+predictormodelのsummaryと95%CIをみておきましょう。
+```{r}
+predictormodel %>% summary
+predictormodel %>% confint
+```
+
+α errorを0.05に設定すると、dep, anxともにアウトカムとは有意な関連がないことがわかります。  
+Bonferroni correctionをするとなおのこと、有意な関連は見出せません。  
+  
+#### 最後に、interaction termを投入したモデルでeffect modificationの有無をみます。  
+なお、linear regressionでみているeffect modificationは、いわゆる"additive effect"になります。  
+"multiplicable effect measure modification"をみたい場合はどうすればよいかは、よくわかりません(笑)
+```{r}
+model_int <- lm(iadl ~ dep + anxiety_bin + social + race + ptage + charlson + edcat + whiteley + dep*anxiety_bin, data = dat_wo_missing)
+model_int %>% summary
+model_int %>% confint
+```
+
+p-valueとしてはdep*Minorが0.05を下回りましたね。
+これをsignificantと捉えるか、あくまでhypothesis generatingな解析なのでp-valueを報告しないかは、人それぞれということでよいかと思います。
+
+おしまい。
