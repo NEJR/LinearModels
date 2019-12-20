@@ -19,3 +19,7 @@ Mixed Models
 #### Option:
 
 correlation map (n x n colored graph)
+
+
+### Notes
+InteractionはStepewiseの最後にあります
